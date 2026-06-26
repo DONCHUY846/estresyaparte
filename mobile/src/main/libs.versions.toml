@@ -1,0 +1,7 @@
+[versions]
+# ... mantén tus versiones
+ksp = "2.2.10-1.0.29" # Asegúrate de que los primeros números coincidan con tu versión de Kotlin
+
+[plugins]
+# ... tus otros plugins
+kotlin-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
