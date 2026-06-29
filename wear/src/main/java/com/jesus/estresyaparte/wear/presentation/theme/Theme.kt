@@ -1,7 +1,7 @@
 package com.jesus.estresyaparte.wear.presentation.theme
 
 import androidx.compose.runtime.Composable
-import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material.MaterialTheme
 
 @Composable
 fun EstresyaparteTheme(
