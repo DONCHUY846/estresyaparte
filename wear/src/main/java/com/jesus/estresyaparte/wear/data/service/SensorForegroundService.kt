@@ -15,6 +15,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.jesus.estresyaparte.shared.BiometricData
 import com.jesus.estresyaparte.wear.data.local.AppDatabase
+import com.jesus.estresyaparte.wear.data.network.NetworkMonitor
 import com.jesus.estresyaparte.wear.data.repository.BiometricRepositoryImpl
 import com.jesus.estresyaparte.wear.domain.repository.BiometricRepository
 import kotlinx.coroutines.*
@@ -23,9 +24,9 @@ import kotlin.math.sqrt
 class SensorForegroundService : Service(), SensorEventListener {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    
     private lateinit var sensorManager: SensorManager
     private lateinit var repository: BiometricRepository
+    private lateinit var networkMonitor: NetworkMonitor // Propiedad agregada
 
     // Variables temporales para guardar el último estado de los sensores
     private var currentHeartRate: Int = 75 // Base promedio
@@ -38,13 +39,30 @@ class SensorForegroundService : Service(), SensorEventListener {
         super.onCreate()
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         
-        // Inicializamos la base de datos y el repositorio manualmente
+        // 1. Inicializar el Monitor de Red Real
+        networkMonitor = NetworkMonitor(applicationContext)
+        networkMonitor.startMonitoring()
+
+        // 2. Pasar el monitor al repositorio
         val database = AppDatabase.getDatabase(applicationContext)
-        repository = BiometricRepositoryImpl(database.biometricDao())
+        repository = BiometricRepositoryImpl(database.biometricDao(), networkMonitor)
 
         registerSensors()
         startForegroundService()
         startSamplingLoop()
+        observeNetworkChanges() // 3. Activar el disparador automático
+    }
+
+    // RNF-01: Escucha reactiva. Cuando Wi-Fi regresa, vacía el buffer automáticamente.
+    private fun observeNetworkChanges() {
+        serviceScope.launch {
+            networkMonitor.isWifiConnected.collect { isConnected ->
+                if (isConnected) {
+                    // Se recuperó el Wi-Fi, lanzamos el vaciado asíncrono
+                    repository.syncLocalBufferWithCloud()
+                }
+            }
+        }
     }
 
     private fun registerSensors() {
@@ -129,6 +147,7 @@ class SensorForegroundService : Service(), SensorEventListener {
     override fun onDestroy() {
         super.onDestroy()
         sensorManager.unregisterListener(this)
+        networkMonitor.stopMonitoring() // Muy importante para no dejar memory leaks
         samplingJob?.cancel()
         serviceScope.cancel()
     }

@@ -3,21 +3,23 @@ package com.jesus.estresyaparte.wear.data.repository
 import com.jesus.estresyaparte.shared.BiometricData
 import com.jesus.estresyaparte.wear.data.local.BiometricDao
 import com.jesus.estresyaparte.wear.data.local.BiometricEntity
+import com.jesus.estresyaparte.wear.data.network.NetworkMonitor
 import com.jesus.estresyaparte.wear.domain.repository.BiometricRepository
 
 class BiometricRepositoryImpl(
-    private val biometricDao: BiometricDao
-    // Aquí inyectaremos el servicio de API/WebSocket en la Fase 3
+    private val biometricDao: BiometricDao,
+    private val networkMonitor: NetworkMonitor // Monitor inyectado
 ) : BiometricRepository {
 
     override suspend fun processSensorCapture(data: BiometricData) {
-        val isWifiConnected = checkNetworkConnectivity() // Lógica de validación de red (RF-03)
+        // RF-03: Ahora validamos la red real de forma dinámica
+        val isWifiConnected = networkMonitor.isWifiConnected.value 
 
         if (isWifiConnected) {
-            // Caso Online: Envío directo a la nube (RF-03)
+            // Caso Online: Envío directo a la nube vía API/WebSocket (RF-03)
             sendToCloud(data)
         } else {
-            // Caso Offline: Mapeo y almacenamiento en el buffer local de Room (RF-03 / RNF-04)
+            // Caso Offline: Guardar en el buffer local de Room (RF-03, RNF-04)
             val entity = BiometricEntity(
                 id = data.id,
                 userId = data.userId,
@@ -31,33 +33,35 @@ class BiometricRepositoryImpl(
     }
 
     override suspend fun syncLocalBufferWithCloud(): Boolean {
-        // RNF-01: Al recuperar la conexión, prioriza el envío del buffer acumulado
+        // RNF-01: Extraer el buffer acumulado cronológicamente
         val bufferedRecords = biometricDao.getAllBufferedData()
         if (bufferedRecords.isEmpty()) return true
 
         try {
-            // Simulamos el envío en bloque a la nube
+            // Enviamos los bloques de datos offline acumulados
             bufferedRecords.forEach { entity ->
-                // sendToCloud(...)
+                val dataToSync = BiometricData(
+                    id = entity.id,
+                    userId = entity.userId,
+                    heartRate = entity.heartRate,
+                    IsMoving = entity.isMoving,
+                    ambientLight = entity.ambientLight,
+                    timestamp = entity.timestamp
+                )
+                sendToCloud(dataToSync)
             }
             
-            // Si todo se envió con éxito, limpiamos esos IDs del buffer local
+            // Si la nube los recibió bien, limpiamos el buffer local
             val syncedIds = bufferedRecords.map { it.id }
             biometricDao.deleteSyncedData(syncedIds)
             return true
         } catch (e: Exception) {
-            // Si falla la red a mitad del proceso, los datos se quedan seguros en Room
+            // Resiliencia: si falla la red a la mitad, permanecen en Room
             return false
         }
     }
 
-    // Función auxiliar para simular la detección de Wi-Fi temporalmente
-    private fun checkNetworkConnectivity(): Boolean {
-        // En la Fase 3 usaremos el ConnectivityManager real de Android
-        return false // Forzamos false para probar el buffer local primero
-    }
-
     private suspend fun sendToCloud(data: BiometricData) {
-        // Se conectará en la siguiente fase vía Ktor/WebSockets
+        // Aquí se conectará el WebSocket definitivo
     }
 }
